@@ -1,94 +1,130 @@
 // Simple email regex
 const emailRegex = /[\w\.-]+@[\w\.-]+\.\w+/;
 
+// Keep track of extension state
+let isExtensionActive = true;
+chrome.storage.local.get(['isActive'], function(result) {
+    isExtensionActive = result.isActive === undefined ? true : result.isActive;
+});
+
+// Listen for changes in extension state
+chrome.storage.onChanged.addListener(function(changes, namespace) {
+    if (changes.isActive) {
+        isExtensionActive = changes.isActive.newValue;
+    }
+});
+
 // Function to get exact clicked text
 function getClickedText(element, x, y) {
     try {
-        if (!element.firstChild) return null;
-        
-        const range = document.createRange();
-        const textNode = element.firstChild;
-        const text = textNode.textContent;
-        
-        // Try each word in the text
-        const words = text.split(/\s+/);
-        let currentPos = 0;
-        
-        for (const word of words) {
-            if (!word) continue;
-            
-            // Create range for this word
-            range.setStart(textNode, currentPos);
-            range.setEnd(textNode, currentPos + word.length);
-            
-            // Check if click was within this word's bounds
-            const rect = range.getBoundingClientRect();
-            if (x >= rect.left && x <= rect.right && 
-                y >= rect.top && y <= rect.bottom) {
-                return word;
+        // If element is a text node, use its parent
+        if (element.nodeType === Node.TEXT_NODE) {
+            element = element.parentNode;
+        }
+
+        // First try: direct text content if it's an email
+        const directText = element.textContent?.trim() || '';
+        if (emailRegex.test(directText)) {
+            return directText;
+        }
+
+        // Second try: check if it's a mailto link
+        if (element.tagName === 'A' && element.href?.startsWith('mailto:')) {
+            const email = element.href.replace('mailto:', '').trim();
+            if (emailRegex.test(email)) {
+                return email;
             }
-            
-            currentPos += word.length + 1; // +1 for the space
+        }
+
+        // Third try: find email in text content
+        const text = element.textContent || '';
+        const matches = text.match(new RegExp(emailRegex, 'g')) || [];
+        
+        if (matches.length === 1) {
+            return matches[0];
+        } else if (matches.length > 1) {
+            // If multiple matches, try to find the closest one to click
+            try {
+                const range = document.createRange();
+                const textNode = element.firstChild;
+                
+                for (const match of matches) {
+                    const startIndex = text.indexOf(match);
+                    const endIndex = startIndex + match.length;
+                    
+                    range.setStart(textNode, startIndex);
+                    range.setEnd(textNode, endIndex);
+                    
+                    const rect = range.getBoundingClientRect();
+                    if (x >= rect.left && x <= rect.right && 
+                        y >= rect.top && y <= rect.bottom) {
+                        return match;
+                    }
+                }
+            } catch (e) {
+                // If range selection fails, return the first match
+                return matches[0];
+            }
         }
     } catch (e) {
-        console.error('Error getting clicked text:', e);
+        console.debug('Non-critical error getting clicked text:', e);
     }
     return null;
 }
 
-// Aggressively block context menu and handle email copy
-document.addEventListener('mousedown', function(e) {
-    if (e.button !== 2) return; // Only handle right click
+// Function to show notification
+function showNotification(text, x, y) {
+    const notification = document.createElement('div');
+    notification.textContent = text;
+    notification.style.cssText = `
+        position: fixed;
+        top: ${y}px;
+        left: ${x}px;
+        background: #4CAF50;
+        color: white;
+        padding: 8px;
+        border-radius: 4px;
+        z-index: 999999;
+        font-family: Arial, sans-serif;
+        font-size: 14px;
+        pointer-events: none;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    `;
     
-    // Check if extension is active
-    chrome.storage.local.get(['isActive'], function(result) {
-        const isActive = result.isActive === undefined ? true : result.isActive;
-        if (!isActive) return;
+    document.body.appendChild(notification);
+    setTimeout(() => notification.remove(), 1000);
+}
 
-        const clickedText = getClickedText(e.target, e.clientX, e.clientY);
-        if (!clickedText) return;
-        
-        // Check if clicked text is an email
-        if (emailRegex.test(clickedText)) {
-            // Block the context menu completely
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-            
-            // Copy the email
-            navigator.clipboard.writeText(clickedText).then(() => {
-                // Show notification
-                const notification = document.createElement('div');
-                notification.textContent = 'Email copied!';
-                notification.style.cssText = `
-                    position: fixed;
-                    top: ${e.clientY}px;
-                    left: ${e.clientX}px;
-                    background: #4CAF50;
-                    color: white;
-                    padding: 8px;
-                    border-radius: 4px;
-                    z-index: 999999;
-                    font-family: Arial, sans-serif;
-                    font-size: 14px;
-                    pointer-events: none;
-                    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-                `;
-                
-                document.body.appendChild(notification);
-                setTimeout(() => notification.remove(), 1000);
-            });
-        }
-    });
-}, true);
+// Variable to track if we should block the next context menu
+let shouldBlockNextContextMenu = false;
 
-// Additional blocking of context menu
-document.addEventListener('contextmenu', function(e) {
+// Handle mousedown event
+document.addEventListener('mousedown', function(e) {
+    if (e.button !== 2 || !isExtensionActive) return; // Only handle right click when extension is active
+    
     const clickedText = getClickedText(e.target, e.clientX, e.clientY);
     if (clickedText && emailRegex.test(clickedText)) {
+        shouldBlockNextContextMenu = true;
+        
+        // Copy the email
+        navigator.clipboard.writeText(clickedText).then(() => {
+            showNotification('Email copied!', e.clientX, e.clientY);
+        });
+        
+        // Block the event
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
+    }
+}, true);
+
+// Handle context menu event
+document.addEventListener('contextmenu', function(e) {
+    if (shouldBlockNextContextMenu) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        shouldBlockNextContextMenu = false; // Reset the flag
         return false;
     }
 }, true);
