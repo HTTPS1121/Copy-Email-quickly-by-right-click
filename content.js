@@ -3,14 +3,21 @@ const emailRegex = /[\w\.-]+@[\w\.-]+\.\w+/;
 
 // Keep track of extension state
 let isExtensionActive = true;
-chrome.storage.local.get(['isActive'], function(result) {
+let showNotification = true;
+
+// Load initial states
+chrome.storage.local.get(['isActive', 'showNotification'], function(result) {
     isExtensionActive = result.isActive === undefined ? true : result.isActive;
+    showNotification = result.showNotification === undefined ? true : result.showNotification;
 });
 
 // Listen for changes in extension state
 chrome.storage.onChanged.addListener(function(changes, namespace) {
     if (changes.isActive) {
         isExtensionActive = changes.isActive.newValue;
+    }
+    if (changes.showNotification) {
+        showNotification = changes.showNotification.newValue;
     }
 });
 
@@ -22,13 +29,7 @@ function getClickedText(element, x, y) {
             element = element.parentNode;
         }
 
-        // First try: direct text content if it's an email
-        const directText = element.textContent?.trim() || '';
-        if (emailRegex.test(directText)) {
-            return directText;
-        }
-
-        // Second try: check if it's a mailto link
+        // First try: check if it's a mailto link
         if (element.tagName === 'A' && element.href?.startsWith('mailto:')) {
             const email = element.href.replace('mailto:', '').trim();
             if (emailRegex.test(email)) {
@@ -36,12 +37,35 @@ function getClickedText(element, x, y) {
             }
         }
 
+        // Second try: exact text content if it's exactly an email
+        const directText = element.textContent?.trim() || '';
+        if (directText && emailRegex.test(directText) && !directText.includes(' ')) {
+            return directText;
+        }
+
         // Third try: find email in text content
         const text = element.textContent || '';
         const matches = text.match(new RegExp(emailRegex, 'g')) || [];
         
         if (matches.length === 1) {
-            return matches[0];
+            // Verify this is actually what was clicked
+            const matchIndex = text.indexOf(matches[0]);
+            try {
+                const range = document.createRange();
+                const textNode = element.firstChild;
+                
+                range.setStart(textNode, matchIndex);
+                range.setEnd(textNode, matchIndex + matches[0].length);
+                
+                const rect = range.getBoundingClientRect();
+                if (x >= rect.left && x <= rect.right && 
+                    y >= rect.top && y <= rect.bottom) {
+                    return matches[0];
+                }
+            } catch (e) {
+                // If range check fails, don't return anything
+                return null;
+            }
         } else if (matches.length > 1) {
             // If multiple matches, try to find the closest one to click
             try {
@@ -62,8 +86,8 @@ function getClickedText(element, x, y) {
                     }
                 }
             } catch (e) {
-                // If range selection fails, return the first match
-                return matches[0];
+                // If range selection fails, don't return anything
+                return null;
             }
         }
     } catch (e) {
@@ -73,7 +97,9 @@ function getClickedText(element, x, y) {
 }
 
 // Function to show notification
-function showNotification(text, x, y) {
+function showCopyNotification(text, x, y) {
+    if (!showNotification) return; // Skip if notifications are disabled
+    
     const notification = document.createElement('div');
     notification.textContent = text;
     notification.style.cssText = `
@@ -100,15 +126,18 @@ let shouldBlockNextContextMenu = false;
 
 // Handle mousedown event
 document.addEventListener('mousedown', function(e) {
-    if (e.button !== 2 || !isExtensionActive) return; // Only handle right click when extension is active
+    // First check if it's a right click and extension is active
+    if (e.button !== 2 || !isExtensionActive) return;
     
     const clickedText = getClickedText(e.target, e.clientX, e.clientY);
+    
+    // Only proceed if we found an email
     if (clickedText && emailRegex.test(clickedText)) {
         shouldBlockNextContextMenu = true;
         
         // Copy the email
         navigator.clipboard.writeText(clickedText).then(() => {
-            showNotification('Email copied!', e.clientX, e.clientY);
+            showCopyNotification('Email copied!', e.clientX, e.clientY);
         });
         
         // Block the event
@@ -120,7 +149,8 @@ document.addEventListener('mousedown', function(e) {
 
 // Handle context menu event
 document.addEventListener('contextmenu', function(e) {
-    if (shouldBlockNextContextMenu) {
+    // Only block if extension is active and we found an email
+    if (isExtensionActive && shouldBlockNextContextMenu) {
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();

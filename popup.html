@@ -11,6 +11,14 @@
       display: flex;
       align-items: center;
       gap: 10px;
+      margin-bottom: 10px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #eee;
+    }
+    .notification-container {
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }
     .power-icon {
       width: 24px;
@@ -30,6 +38,19 @@
       font-size: 14px;
       color: #333;
     }
+    .checkbox-wrapper {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .checkbox-wrapper input[type="checkbox"] {
+      cursor: pointer;
+    }
+    .checkbox-wrapper label {
+      font-size: 14px;
+      color: #333;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
@@ -38,6 +59,12 @@
       <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm0-14v8"></path>
     </svg>
     <span class="status-text">Extension is <span id="statusText">active</span></span>
+  </div>
+  <div class="notification-container">
+    <div class="checkbox-wrapper">
+      <input type="checkbox" id="showNotification" checked>
+      <label for="showNotification">Show "Email copied" notification</label>
+    </div>
   </div>
   <script src="popup.js"></script>
 </body>

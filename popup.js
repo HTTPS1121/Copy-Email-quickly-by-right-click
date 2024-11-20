@@ -1,11 +1,15 @@
 document.addEventListener('DOMContentLoaded', function() {
   const powerIcon = document.getElementById('powerIcon');
   const statusText = document.getElementById('statusText');
+  const showNotificationCheckbox = document.getElementById('showNotification');
 
-  // Load initial state
-  chrome.storage.local.get(['isActive'], function(result) {
+  // Load initial states
+  chrome.storage.local.get(['isActive', 'showNotification'], function(result) {
     const isActive = result.isActive === undefined ? true : result.isActive;
+    const showNotification = result.showNotification === undefined ? true : result.showNotification;
+    
     updateUI(isActive);
+    showNotificationCheckbox.checked = showNotification;
   });
 
   powerIcon.addEventListener('click', function() {
@@ -17,6 +21,10 @@ document.addEventListener('DOMContentLoaded', function() {
         updateUI(newState);
       });
     });
+  });
+
+  showNotificationCheckbox.addEventListener('change', function() {
+    chrome.storage.local.set({ showNotification: this.checked });
   });
 
   function updateUI(isActive) {
